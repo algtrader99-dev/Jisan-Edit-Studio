@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jisan Edit Studio Admin</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;padding:18px;
+  background:#0b1020;color:#fff;
+  font-family:Arial,sans-serif
+}
+.container{max-width:850px;margin:auto}
+.card{
+  background:#151d32;padding:20px;
+  border-radius:15px;margin:16px 0
+}
+input,button,select{
+  width:100%;padding:13px;margin:7px 0;
+  border-radius:8px;border:1px solid #3a4663;
+  font-size:15px
+}
+input,select{background:#0b1020;color:white}
+button{
+  background:#7657ff;color:white;
+  border:0;font-weight:bold
+}
+.secondary{background:#273652}
+.order{
+  border:1px solid #3a4663;
+  padding:14px;border-radius:10px;
+  margin:12px 0;overflow-wrap:anywhere
+}
+.small{color:#b9c4dd;font-size:14px}
+.hidden{display:none}
+#message{white-space:pre-wrap}
+</style>
+</head>
+
+<body>
+<div class="container">
+  <h1>Jisan Edit Studio</h1>
+  <p class="small">Admin Dashboard</p>
+
+  <div class="card" id="loginBox">
+    <h2>Admin Login</h2>
+
+    <input id="email" type="email"
+      placeholder="Admin email"
+      value="algtrader99@gmail.com">
+
+    <input id="password" type="password"
+      placeholder="Your Firebase account password">
+
+    <button id="loginBtn">Login</button>
+    <button id="verifyBtn" class="secondary">
+      Send Verification Email
+    </button>
+
+    <p id="message" class="small"></p>
+  </div>
+
+  <div class="card hidden" id="dashboard">
+    <h2>Customer Orders</h2>
+    <button id="refreshBtn">Refresh Orders</button>
+    <button id="logoutBtn" class="secondary">Logout</button>
+    <div id="orders">Loading...</div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp }
+from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  onAuthStateChanged,
+  signOut,
+  sendEmailVerification
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+import {
+  getFirestore,
+  collection,
+  getDocs,
+  query,
+  orderBy,
+  doc,
+  updateDoc,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+/* নিজের Firebase Console থেকে পাওয়া Config বসাও */
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyD6uCoSS7Hh0BBZDXTTZFv-mvX84WT_uGc",
+  authDomain: "jisan-edit-studio-213e3.firebaseapp.com",
+  projectId: "jisan-edit-studio-213e3",
+  storageBucket: "jisan-edit-studio-213e3.firebasestorage.app",
+  messagingSenderId: "887671449544",
+  appId: "1:887671449544:web:b15c0c7f799774c06ec2fd",
+  measurementId: "G-YS3LR04CK7"
+};
+
+const ADMIN_EMAIL = "algtrader99@gmail.com";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const $ = id => document.getElementById(id);
+
+function showMessage(text) {
+  $("message").textContent = text;
+}
+
+/* Admin login */
+$("loginBtn").onclick = async () => {
+  showMessage("Logging in...");
+
+  try {
+    const email = $("email").value.trim().toLowerCase();
+    const password = $("password").value;
+
+    if (email !== ADMIN_EMAIL) {
+      showMessage("এই Admin email ব্যবহার করো: " + ADMIN_EMAIL);
+      return;
+    }
+
+    await signInWithEmailAndPassword(auth, email, password);
+
+  } catch (error) {
+    showMessage("Login error: " + error.message);
+  }
+};
+
+/* Verification email */
+$("verifyBtn").onclick = async () => {
+  showMessage("Processing...");
+
+  try {
+    const email = $("email").value.trim().toLowerCase();
+    const password = $("password").value;
+
+    if (email !== ADMIN_EMAIL) {
+      showMessage("Admin email ঠিক করে লেখো।");
+      return;
+    }
+
+    const result = await signInWithEmailAndPassword(
+      auth, email, password
+    );
+
+    if (result.user.emailVerified) {
+      showMessage("তোমার email ইতিমধ্যে verified!");
+    } else {
+      await sendEmailVerification(result.user);
+      await signOut(auth);
+      showMessage(
+        "Verification email পাঠানো হয়েছে। Gmail Inbox ও Spam folder দেখো।"
+      );
+    }
+
+  } catch (error) {
+    showMessage("Verification error: " + error.message);
+  }
+};
+
+/* Login state */
+onAuthStateChanged(auth, async user => {
+  const allowed = Boolean(
+    user &&
+    user.email &&
+    user.email.toLowerCase() === ADMIN_EMAIL &&
+    user.emailVerified
+  );
+
+  $("loginBox").classList.toggle("hidden", allowed);
+  $("dashboard").classList.toggle("hidden", !allowed);
+
+  if (allowed) {
+    showMessage("");
+    await loadOrders();
+  } else {
+    $("orders").textContent = "Admin login required.";
+    if (user) {
+      showMessage("Email verified নয়। Verification button ব্যবহার করো।");
+      await signOut(auth);
+    }
+  }
+});
+
+/* Load customer orders */
+async function loadOrders() {
+  $("orders").textContent = "Orders loading...";
+
+  try {
+    const q = query(
+      collection(db, "orders"),
+      orderBy("createdAt", "desc")
+    );
+
+    const result = await getDocs(q);
+    $("orders").replaceChildren();
+
+    if (result.empty) {
+      $("orders").textContent = "এখনো কোনো order নেই।";
+      return;
+    }
+
+    result.forEach(orderDoc => {
+      const data = orderDoc.data();
+      const card = document.createElement("div");
+      card.className = "order";
+
+      const heading = document.createElement("h3");
+      heading.textContent = data.service || "Editing Order";
+      card.appendChild(heading);
+
+      const info = document.createElement("p");
+      info.style.whiteSpace = "pre-wrap";
+      info.textContent =
+        "Name: " + (data.name || "-") +
+        "\nPhone: " + (data.phone || "-") +
+        "\nDetails: " + (data.details || "-") +
+        "\nBudget: " + (data.budget || "-") +
+        "\nDeadline: " + (data.deadline || "-") +
+        "\nStatus: " + (data.status || "Pending");
+
+      card.appendChild(info);
+
+      const status = document.createElement("select");
+
+      ["Pending", "In Progress", "Completed", "Cancelled"]
+      .forEach(value => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        option.selected = (data.status || "Pending") === value;
+        status.appendChild(option);
+      });
+
+      card.appendChild(status);
+
+      const save = document.createElement("button");
+      save.textContent = "Save Status";
+
+      save.onclick = async () => {
+        try {
+          await updateDoc(doc(db, "orders", orderDoc.id), {
+            status: status.value,
+            updatedAt: serverTimestamp()
+          });
+          alert("Order status updated!");
+          await loadOrders();
+        } catch (error) {
+          alert("Update failed: " + error.message);
+        }
+      };
+
+      card.appendChild(save);
+      $("orders").appendChild(card);
+    });
+
+  } catch (error) {
+    $("orders").textContent =
+      "Order loading error: " + error.message;
+  }
+}
+
+$("refreshBtn").onclick = loadOrders;
+$("logoutBtn").onclick = () => signOut(auth);
+</script>
+</body>
+</html>
